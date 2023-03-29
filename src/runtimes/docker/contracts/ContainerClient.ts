@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { FileType, ShellQuotedString } from 'vscode';
-import { GeneratorCommandResponse, PromiseCommandResponse, VoidCommandResponse } from './CommandRunner';
+import { GeneratorCommandResponse, PromiseCommandResponse, VoidCommandResponse} from './CommandRunner';
 import { IShell } from './Shell';
 
 export type ContainerOS = "linux" | "windows";
@@ -1857,6 +1857,10 @@ type WriteFileCommand = {
     writeFile(options: WriteFileCommandOptions): Promise<VoidCommandResponse>;
 };
 
+type DiscoverLspCommand = {
+    isLspInstalled(): Promise<PromiseCommandResponse<Boolean>>;
+}
+
 // #endregion
 
 /**
@@ -1914,4 +1918,7 @@ export interface IContainersClient extends
     ListFilesCommand,
     StatPathCommand,
     ReadFileCommand,
-    WriteFileCommand { }
+    WriteFileCommand,
+    // LSP
+    DiscoverLspCommand
+    { }

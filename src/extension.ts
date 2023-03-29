@@ -7,6 +7,7 @@ import { TelemetryEvent } from '@microsoft/compose-language-service/lib/client/T
 import { callWithTelemetryAndErrorHandling, createExperimentationService, IActionContext, registerErrorHandler, registerEvent, registerReportIssueCommand, registerUIExtensionVariables, UserCancelledError } from '@microsoft/vscode-azext-utils';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { window } from 'vscode';
 import { ConfigurationParams, DidChangeConfigurationNotification, DocumentSelector, LanguageClient, LanguageClientOptions, Middleware, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 import * as tas from 'vscode-tas-client';
 import { registerCommands } from './commands/registerCommands';
@@ -41,6 +42,7 @@ export interface ComposeVersionKeys {
 
 let dockerfileLanguageClient: LanguageClient;
 let composeLanguageClient: LanguageClient;
+let nativeClient: LanguageClient;
 
 const DOCUMENT_SELECTOR: DocumentSelector = [
     { language: 'dockerfile', scheme: 'file' }
@@ -126,7 +128,13 @@ export async function activateInternal(ctx: vscode.ExtensionContext, perfStats: 
         registerDebugProvider(ctx);
         registerTaskProviders(ctx);
 
-        activateDockerfileLanguageClient(ctx);
+        if (await discoverDockerLsp()) {
+            activateDockerNativeLanguageClient(ctx);
+        }
+        else {
+            activateDockerfileLanguageClient(ctx);
+        }
+
         activateComposeLanguageClient(ctx);
 
         registerListeners();
@@ -139,6 +147,21 @@ export async function activateInternal(ctx: vscode.ExtensionContext, perfStats: 
     return new DockerExtensionApi(ctx);
 }
 
+async function discoverDockerLsp(): Promise<boolean> {
+    //const config = vscode.workspace.getConfiguration('docker');
+    //const dockerCommand = config.get<string | undefined>('dockerPath') || 'docker';
+
+    try {
+	const result = await ext.runWithDefaults(client => client.isLspInstalled());
+
+        if (result) {
+	    return true;
+        }
+    } catch (e) {}
+
+    return false;
+}
+
 export async function deactivateInternal(ctx: vscode.ExtensionContext): Promise<void> {
     await callWithTelemetryAndErrorHandling('docker.deactivate', async (activateContext: IActionContext) => {
         activateContext.telemetry.properties.isActivationEvent = 'true';
@@ -147,6 +170,7 @@ export async function deactivateInternal(ctx: vscode.ExtensionContext): Promise<
         await Promise.all([
             dockerfileLanguageClient.stop(),
             composeLanguageClient.stop(),
+	    nativeClient.stop()
         ]);
     });
 }
@@ -238,6 +262,99 @@ namespace Configuration {
     }
 }
 /* eslint-enable @typescript-eslint/no-namespace */
+
+function activateDockerNativeLanguageClient(ctx: vscode.ExtensionContext): void {
+
+    void callWithTelemetryAndErrorHandling('docker.nativelanguageclient.activate', async (context: IActionContext) => {
+
+        context.telemetry.properties.isActivationEvent = 'true';
+
+        const config = vscode.workspace.getConfiguration('docker');
+        const dockerCommand = config.get<string | undefined>('dockerPath') || 'docker';
+
+        ext.outputChannel.debug(`docker.dockerPath: ${dockerCommand}`);
+        const serverModule = `${dockerCommand}`;
+
+        const args = [
+             "lsp",
+             "listen"
+        ];
+
+        const user = vscode.workspace.getConfiguration().get("DockerLsp.User");
+        const workspace = vscode.workspace.getConfiguration().get("DockerLsp.Workspace");
+        if (!!user && user != "") {
+             args.push("--user", user as string);
+        }
+        if (!!workspace && workspace != "") {
+            args.push("--workspace", workspace as string);
+        }
+
+        const serverOptions: ServerOptions = {
+            run: { command: serverModule, transport: TransportKind.stdio, args },
+            debug: {
+                command: serverModule,
+                args,
+                transport: TransportKind.stdio,
+            },
+        };
+
+        const clientOptions: LanguageClientOptions = {
+            documentSelector: DOCUMENT_SELECTOR,
+            progressOnInitialization: true,
+            outputChannel: window.createOutputChannel("Docker LSP"),
+            revealOutputChannelOn: 4,
+            middleware: {
+                didOpen: async (data, next) => {
+                    nativeClient.info("Did open: " + JSON.stringify(data));
+                    return next(data);
+                },
+                didChange: async (data, next) => {
+                    nativeClient.info("Did change: " + JSON.stringify(data));
+                    return next(data);
+                }
+            }
+        };
+
+        nativeClient = new LanguageClient(
+            'dockerLanguageClient',
+            'Docker LSP Client',
+            serverOptions,
+            clientOptions
+        );
+        const command = 'dockerLspClient.serverInfoShow';
+
+        const commandHandler = async () => {
+            nativeClient.info("Getting server info");
+            await nativeClient.sendRequest("docker/serverInfo/show");
+        };
+
+        ctx.subscriptions.push(vscode.commands.registerCommand(command, commandHandler));
+        ctx.subscriptions.push(vscode.commands.registerCommand('dockerLspClient.login',
+            async () => {
+                await nativeClient.sendRequest("docker/login");
+            }));
+
+        vscode.workspace.onDidChangeConfiguration(event => {
+            nativeClient.info(`configuration change:  ${JSON.stringify(event)}`);
+            if (event.affectsConfiguration('DockerLsp.User') || event.affectsConfiguration('DockerLsp.Workspace')) {
+                nativeClient.info('update login info')
+                nativeClient.sendRequest(
+                    "docker/login",
+                    vscode.workspace.getConfiguration().get("DockerLsp.User"),
+                    vscode.workspace.getConfiguration().get("DockerLsp.Workspace"));
+            }
+        });
+
+        await nativeClient.start();
+
+        ctx.subscriptions.push(nativeClient);
+
+        nativeClient.info("Client started...");
+        const r = await nativeClient.sendRequest("docker/serverInfo/raw");
+        nativeClient.info("Log path: " + r['log-path']);
+        nativeClient.info("REPL port: " + r['port']);
+    });
+}
 
 function activateDockerfileLanguageClient(ctx: vscode.ExtensionContext): void {
     // Don't wait

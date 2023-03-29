@@ -1536,6 +1536,16 @@
         "configuration": {
             "title": "Docker",
             "properties": {
+                "DockerLsp.User": {
+                    "type": "string",
+                    "scope": "resource",
+                    "description": "Docker User"
+                },
+                "DockerLsp.Workspace": {
+                    "type": "string",
+                    "scope": "resource",
+                    "description": "Optional location of workspace cache"
+                },
                 "docker.promptForRegistryWhenPushingImages": {
                     "type": "boolean",
                     "default": true,
@@ -2259,6 +2269,14 @@
             }
         },
         "commands": [
+            {
+                "command": "dockerLspClient.serverInfoShow",
+                "title": "Docker LSP Server Info"
+            },
+            {
+                "command": "dockerLspClient.login",
+                "title": "Docker LSP Login"
+            },
             {
                 "command": "vscode-docker.compose.down",
                 "title": "%vscode-docker.commands.compose.down%",

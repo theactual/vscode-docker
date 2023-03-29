@@ -1726,4 +1726,17 @@ export abstract class DockerClientBase extends ConfigurableClient implements ICo
     //#endregion
 
     //#endregion
+    
+    async isLspInstalled(): Promise<PromiseCommandResponse<Boolean>> {
+        return {
+	    command: this.commandName,
+	    args: ["lsp", "docker-cli-plugin-metadata"],
+	    parse: async (output, strict) => {
+		if (output.includes("Docker Language Server")) {
+		    return true;
+		}
+                return false;
+	    }
+	}
+    }
 }
